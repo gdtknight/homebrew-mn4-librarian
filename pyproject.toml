@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mn4-librarian"
+version = "0.1.0"
+description = "MarginNote4 PDF library filename standardization and tag management"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "gdtknight" }]
+dependencies = ["pypdf>=4.0"]
+
+[project.urls]
+Homepage = "https://github.com/gdtknight/mn4-librarian"
+
+[project.scripts]
+mn4-librarian = "mn4_librarian.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mn4_librarian"]
+
+[tool.hatch.build.targets.sdist]
+# 리포지토리 루트에는 사용자의 실제 iCloud 라이브러리를 가리키는 심볼릭 링크
+# (mn4, New Documents)가 있을 수 있다 — only-include로 완전히 화이트리스트
+# 방식으로 좁혀서, 실수로 심볼릭 링크를 따라가거나(사용자의 개인 PDF 라이브러리
+# 전체가 딸려 들어감 — 실제로 한 번 발생: 11GB짜리 tar.gz) .venv 안의 파일이
+# 끌려 들어가는 사고(hatchling의 license-files 자동 스캔이 include 범위와
+# 무관하게 프로젝트 전체에서 LICENSE 파일을 긁어감)를 막는다. include(추가)가
+# 아니라 only-include(전체 교체)를 써야 이 자동 스캔도 함께 제한된다.
+only-include = [
+    "src/mn4_librarian",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]

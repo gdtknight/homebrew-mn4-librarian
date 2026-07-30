@@ -1,0 +1,276 @@
+"""MarginNote4 DB(태그) 감사 — 읽기 전용.
+
+이번 세션에 실제 라이브 DB를 대상으로 손으로 짠 조사 스크립트(full_review.py
+등)에서 확인한 8가지 점검을 일반화했다. DB는 절대 쓰지 않는다
+(mn4_db.connect_readonly로 연다).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
+
+from . import mn4_db, settings, taxonomy
+
+
+def _normalize(name: str) -> str:
+    return name.lower().replace("'", "").replace(".", "").replace(",", "").replace(" ", "").replace("-", "")
+
+
+@dataclass
+class AuditReport:
+    # 폴더 구조(taxonomy.scan) vs DB 태그 계층 drift
+    missing_in_db: list[tuple[str, str | None]] = field(default_factory=list)
+    missing_in_folder: list[tuple[str, str | None]] = field(default_factory=list)
+    # 0권인 소분류 태그
+    unused_subcategory_tags: list[tuple[str, str]] = field(default_factory=list)
+    # 정규화하면 같은 이름인 출판사/저자 태그 (오타/표기 차이 의심)
+    near_duplicate_tags: dict[str, list[str]] = field(default_factory=dict)
+    # ZBOOK이 가리키는데 디스크에 없는 파일
+    missing_files: list[str] = field(default_factory=list)
+    # 완전 동일 MD5 / 동일 파일명-다른 MD5
+    exact_md5_duplicates: dict[str, list[str]] = field(default_factory=dict)
+    same_name_diff_md5: dict[str, list[str]] = field(default_factory=dict)
+    # 책 단위 문제
+    untagged_books: list[str] = field(default_factory=list)
+    no_major_books: list[tuple[str, list[str]]] = field(default_factory=list)
+    folder_tag_mismatches: list[dict] = field(default_factory=list)
+
+    def is_clean(self) -> bool:
+        return not any(
+            [
+                self.missing_in_db,
+                self.missing_in_folder,
+                self.unused_subcategory_tags,
+                self.near_duplicate_tags,
+                self.missing_files,
+                self.exact_md5_duplicates,
+                self.same_name_diff_md5,
+                self.untagged_books,
+                self.no_major_books,
+                self.folder_tag_mismatches,
+            ]
+        )
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _check_taxonomy_drift(
+    tag_index: mn4_db.TagIndex, folder_taxonomy: dict[str, list[str]]
+) -> tuple[list[tuple[str, str | None]], list[tuple[str, str | None]]]:
+    db_taxonomy: dict[str, list[str]] = {}
+    for root_id in tag_index.roots():
+        name = tag_index.name_by_id[root_id]
+        if name in mn4_db.META_ROOT_TAG_NAMES:
+            continue
+        db_taxonomy[name] = [tag_index.name_by_id.get(c, c) for c in tag_index.links_by_id[root_id]]
+
+    missing_in_db: list[tuple[str, str | None]] = []
+    for major, subs in folder_taxonomy.items():
+        if major not in db_taxonomy:
+            missing_in_db.append((major, None))
+            continue
+        for sub in subs:
+            if sub not in db_taxonomy[major]:
+                missing_in_db.append((major, sub))
+
+    missing_in_folder: list[tuple[str, str | None]] = []
+    for major, subs in db_taxonomy.items():
+        if major not in folder_taxonomy:
+            missing_in_folder.append((major, None))
+            continue
+        for sub in subs:
+            if sub not in folder_taxonomy[major]:
+                missing_in_folder.append((major, sub))
+
+    return missing_in_db, missing_in_folder
+
+
+def _check_unused_subcategories(
+    tag_index: mn4_db.TagIndex, folder_taxonomy: dict[str, list[str]], usage: dict[str, int]
+) -> list[tuple[str, str]]:
+    unused = []
+    for major in folder_taxonomy:
+        mid = tag_index.find_id(major)
+        if mid is None:
+            continue
+        for child in tag_index.links_by_id[mid]:
+            if usage.get(child, 0) == 0:
+                unused.append((major, tag_index.name_by_id.get(child, child)))
+    return unused
+
+
+def _check_near_duplicates(tag_index: mn4_db.TagIndex) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for parent_name in ("출판사", "저자"):
+        pid = tag_index.find_id(parent_name)
+        if pid is None:
+            continue
+        by_norm: dict[str, list[str]] = defaultdict(list)
+        for child in tag_index.links_by_id[pid]:
+            name = tag_index.name_by_id.get(child, child)
+            by_norm[_normalize(name)].append(name)
+        for names in by_norm.values():
+            if len(names) > 1:
+                result[f"{parent_name}:{names[0]}"] = names
+    return result
+
+
+def run_audit(db_path: Path, library_dir: Path, exclude: frozenset[str] = frozenset()) -> AuditReport:
+    con = mn4_db.connect_readonly(db_path)
+    try:
+        tag_index = mn4_db.TagIndex(con)
+        folder_taxonomy = taxonomy.scan(library_dir, exclude)
+        books = mn4_db.iter_library_books(con)
+
+        usage: dict[str, int] = defaultdict(int)
+        for b in books:
+            for tid in b.taglist:
+                usage[tid] += 1
+
+        missing_in_db, missing_in_folder = _check_taxonomy_drift(tag_index, folder_taxonomy)
+        unused = _check_unused_subcategories(tag_index, folder_taxonomy, usage)
+        near_dupes = _check_near_duplicates(tag_index)
+
+        missing_files = []
+        md5_map: dict[str, list[str]] = defaultdict(list)
+        name_map: dict[str, list[str]] = defaultdict(list)
+        for b in books:
+            full = library_dir / b.rel_dir / b.file
+            if not full.exists():
+                missing_files.append(str(full.relative_to(library_dir)))
+            md5_map[b.md5].append(f"{b.rel_dir}/{b.file}")
+            name_map[b.file].append(f"{b.rel_dir}/{b.file}")
+
+        exact_md5_dup = {k: v for k, v in md5_map.items() if len(v) > 1}
+        same_name_diff_md5 = {k: v for k, v in name_map.items() if len(v) > 1}
+
+        known_majors = set(folder_taxonomy.keys())
+        sub_to_major: dict[str, str] = {}
+        for major, subs in folder_taxonomy.items():
+            for sub in subs:
+                sub_to_major[sub] = major
+
+        untagged: list[str] = []
+        no_major: list[tuple[str, list[str]]] = []
+        mismatches: list[dict] = []
+        for b in books:
+            names = [tag_index.name_by_id.get(t, t) for t in b.taglist]
+            if not b.taglist:
+                untagged.append(f"{b.rel_dir}/{b.file}")
+                continue
+            majors_in = [n for n in names if n in known_majors]
+            if not majors_in:
+                no_major.append((f"{b.rel_dir}/{b.file}", names))
+                continue
+            subs_in = [n for n in names if n in sub_to_major]
+            tmaj = majors_in[0]
+            tsub = subs_in[0] if subs_in else None
+            if tmaj != b.path_major or (tsub and b.path_sub and tsub != b.path_sub):
+                mismatches.append(
+                    {"file": b.file, "rel": b.rel_dir, "tag_major": tmaj, "tag_sub": tsub}
+                )
+
+        return AuditReport(
+            missing_in_db=missing_in_db,
+            missing_in_folder=missing_in_folder,
+            unused_subcategory_tags=unused,
+            near_duplicate_tags=near_dupes,
+            missing_files=missing_files,
+            exact_md5_duplicates=exact_md5_dup,
+            same_name_diff_md5=same_name_diff_md5,
+            untagged_books=untagged,
+            no_major_books=no_major,
+            folder_tag_mismatches=mismatches,
+        )
+    finally:
+        con.close()
+
+
+def save_report(report: AuditReport, logs_dir: Path) -> Path:
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = logs_dir / f"audit-{ts}.json"
+    path.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def print_report(report: AuditReport) -> None:
+    def section(title: str) -> None:
+        print(f"\n{'=' * 70}\n{title}\n{'=' * 70}")
+
+    section("폴더 구조에는 있는데 DB 태그가 없음 (missing_in_db)")
+    if report.missing_in_db:
+        for major, sub in report.missing_in_db:
+            print(f"  {major}" + (f" / {sub}" if sub else " (대분류 전체)"))
+    else:
+        print("없음")
+
+    section("DB 태그는 있는데 폴더가 없음 (missing_in_folder)")
+    if report.missing_in_folder:
+        for major, sub in report.missing_in_folder:
+            print(f"  {major}" + (f" / {sub}" if sub else " (대분류 전체)"))
+    else:
+        print("없음")
+
+    section("사용되지 않는(0권) 소분류 태그")
+    if report.unused_subcategory_tags:
+        for major, sub in report.unused_subcategory_tags:
+            print(f"  {major} / {sub}")
+    else:
+        print("없음")
+
+    section("근접중복 태그명 (출판사/저자)")
+    if report.near_duplicate_tags:
+        for names in report.near_duplicate_tags.values():
+            print(f"  {names}")
+    else:
+        print("없음")
+
+    section("디스크에 없는 파일을 가리키는 ZBOOK")
+    print("없음" if not report.missing_files else "\n".join(f"  {p}" for p in report.missing_files))
+
+    section("완전 동일 MD5 중복 파일")
+    if report.exact_md5_duplicates:
+        for md5, entries in report.exact_md5_duplicates.items():
+            print(f"  MD5={md5}: {entries}")
+    else:
+        print("없음")
+
+    section("동일 파일명, 다른 MD5 (버전/사본 차이)")
+    if report.same_name_diff_md5:
+        for name, entries in report.same_name_diff_md5.items():
+            print(f"  {name}: {entries}")
+    else:
+        print("없음")
+
+    section(f"태그가 전혀 없는 책 ({len(report.untagged_books)}건)")
+    for f in report.untagged_books:
+        print(f"  {f}")
+
+    section(f"대분류 태그가 없는 책 ({len(report.no_major_books)}건)")
+    for f, names in report.no_major_books:
+        print(f"  {f}\n    보유 태그: {names}")
+
+    section(f"폴더-태그 불일치 ({len(report.folder_tag_mismatches)}건)")
+    for m in report.folder_tag_mismatches:
+        print(f"  {m['file']}\n    폴더={m['rel']} / 태그={m['tag_major']}/{m['tag_sub']}")
+
+    print(f"\n{'=' * 70}")
+    print("전체 클린" if report.is_clean() else "위 항목들에 대한 조치가 필요합니다 — `mn4-librarian tags fix` 참고")
+    print("=" * 70)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="MarginNote4 태그 감사 (읽기 전용)")
+    parser.parse_args(argv)
+
+    st = settings.get_settings()
+    report = run_audit(st.mn4_db_path, st.library_dir, taxonomy.exclude_for(st))
+    print_report(report)
+    path = save_report(report, settings.logs_dir())
+    print(f"\n리포트 저장: {path}")
+    return 0 if report.is_clean() else 1

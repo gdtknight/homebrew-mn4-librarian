@@ -1,0 +1,13 @@
+.venv/
+.venv-dev/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# 로컬 개발용 심볼릭 링크/레거시 산출물 (사용자별 경로라 커밋 대상 아님)
+/mn4
+/New Documents
+/scripts/
