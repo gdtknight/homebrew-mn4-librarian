@@ -3,11 +3,8 @@ class Mn4Librarian < Formula
 
   desc "MarginNote4 PDF library filename standardization and tag management"
   homepage "https://github.com/gdtknight/mn4-librarian"
-  # 첫 릴리스 태그(v0.1.0)를 푸시한 뒤 아래 두 줄을 실제 값으로 채운다:
-  #   url:    https://github.com/gdtknight/mn4-librarian/archive/refs/tags/v0.1.0.tar.gz
-  #   sha256: curl -sL <url> | shasum -a 256 로 계산
   url "https://github.com/gdtknight/mn4-librarian/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"
+  sha256 "3b3fd0f0eb45c9c9c9911bf62b823f2b9d759b09f7e797afcd6f7360c07f4986"
   license "MIT"
 
   depends_on "python@3.12"
