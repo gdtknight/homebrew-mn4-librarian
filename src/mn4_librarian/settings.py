@@ -5,18 +5,28 @@
 """
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 CONFIG_DIR_NAME = "mn4-librarian"
 
-# MarginNote4가 iCloud 컨테이너에 두는 SQLite DB의 고정 경로 패턴.
-DEFAULT_MN4_DB_PATH = (
-    Path.home()
-    / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents"
-    / "MN4NotebookDatabase/0/MarginNotes.sqlite"
-)
+
+def _home_dir() -> Path:
+    """HOME 환경변수를 우선 신뢰한다. Path.home()은 pwd 데이터베이스 조회로
+    폴백하는데 이게 일부 환경에서 간헐적으로 실패하는 게 실제로 확인됐다."""
+    home = os.environ.get("HOME")
+    return Path(home) if home else Path.home()
+
+
+def default_mn4_db_path() -> Path:
+    """MarginNote4가 iCloud 컨테이너에 두는 SQLite DB의 고정 경로 패턴."""
+    return (
+        _home_dir()
+        / "Library/Containers/QReader.MarginStudy.easy/Data/Library/Private Documents"
+        / "MN4NotebookDatabase/0/MarginNotes.sqlite"
+    )
 
 
 class SettingsNotConfigured(RuntimeError):
@@ -31,7 +41,7 @@ class Settings:
 
 
 def config_dir() -> Path:
-    return Path.home() / ".config" / CONFIG_DIR_NAME
+    return _home_dir() / ".config" / CONFIG_DIR_NAME
 
 
 def config_file() -> Path:
@@ -56,7 +66,7 @@ def load_settings() -> Settings | None:
         return None
     with path.open("rb") as f:
         data = tomllib.load(f)
-    mn4_db_path = Path(data["mn4_db_path"]) if data.get("mn4_db_path") else DEFAULT_MN4_DB_PATH
+    mn4_db_path = Path(data["mn4_db_path"]) if data.get("mn4_db_path") else default_mn4_db_path()
     return Settings(
         library_dir=Path(data["library_dir"]),
         inbox_dir=Path(data["inbox_dir"]),
@@ -70,7 +80,7 @@ def save_settings(settings: Settings) -> None:
         f'library_dir = "{settings.library_dir}"',
         f'inbox_dir = "{settings.inbox_dir}"',
     ]
-    if settings.mn4_db_path != DEFAULT_MN4_DB_PATH:
+    if settings.mn4_db_path != default_mn4_db_path():
         lines.append(f'mn4_db_path = "{settings.mn4_db_path}"')
     config_file().write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -89,6 +99,26 @@ def get_settings() -> Settings:
 # ---------------------------------------------------------------------------
 
 
+def _expand_path(raw: str) -> Path:
+    """Path.expanduser()는 HOME 환경변수가 없으면 pwd 데이터베이스 조회로
+    폴백하는데, 이 조회가 일부 환경(디렉토리 서비스 지연 등)에서 간헐적으로
+    실패해 RuntimeError("Could not determine home directory")를 던진다.
+    HOME 환경변수를 직접 먼저 확인해 그 폴백 경로를 아예 안 타게 하고,
+    그래도 안 되면 크래시 대신 명확한 안내 메시지를 낸다."""
+    if raw == "~" or raw.startswith("~/"):
+        home = os.environ.get("HOME")
+        if home:
+            return Path(home + raw[1:]).resolve()
+        try:
+            return Path(raw).expanduser().resolve()
+        except RuntimeError as exc:
+            raise ValueError(
+                "홈 디렉토리(~)를 확인할 수 없습니다. 물결표 없이 전체 경로를 입력해주세요 "
+                "(예: /Users/이름/Downloads/PDF)."
+            ) from exc
+    return Path(raw).expanduser().resolve()
+
+
 def _prompt_path(question: str, *, must_exist: bool, default: Path | None = None) -> Path:
     suffix = f" [{default}]" if default else ""
     while True:
@@ -98,7 +128,11 @@ def _prompt_path(question: str, *, must_exist: bool, default: Path | None = None
         if not raw:
             print("경로를 입력하세요.")
             continue
-        path = Path(raw).expanduser().resolve()
+        try:
+            path = _expand_path(raw)
+        except ValueError as exc:
+            print(str(exc))
+            continue
         if must_exist and not path.is_dir():
             print(f"디렉토리를 찾을 수 없습니다: {path}")
             continue
@@ -116,14 +150,19 @@ def run_init_wizard() -> Settings:
     )
     inbox_dir.mkdir(parents=True, exist_ok=True)
 
-    if DEFAULT_MN4_DB_PATH.exists():
-        mn4_db_path = DEFAULT_MN4_DB_PATH
+    default_db_path = default_mn4_db_path()
+    if default_db_path.exists():
+        mn4_db_path = default_db_path
         print(f"MarginNote4 DB 자동 감지됨: {mn4_db_path}")
     else:
-        print(f"MarginNote4 DB를 기본 위치에서 찾지 못했습니다: {DEFAULT_MN4_DB_PATH}")
+        print(f"MarginNote4 DB를 기본 위치에서 찾지 못했습니다: {default_db_path}")
         while True:
             raw = input("MarginNotes.sqlite 전체 경로를 직접 입력하세요: ").strip()
-            candidate = Path(raw).expanduser().resolve()
+            try:
+                candidate = _expand_path(raw)
+            except ValueError as exc:
+                print(str(exc))
+                continue
             if candidate.is_file():
                 mn4_db_path = candidate
                 break
