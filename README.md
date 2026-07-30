@@ -17,6 +17,7 @@ MarginNote4 PDF 라이브러리를 위한 파일명 표준화 + 태그 관리 �
 
 ```bash
 brew tap gdtknight/mn4-librarian
+brew trust gdtknight/mn4-librarian   # 처음 추가하는 서드파티 tap이라 필요
 brew install mn4-librarian
 ```
 
