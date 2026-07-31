@@ -3,8 +3,8 @@ class Mn4Librarian < Formula
 
   desc "MarginNote4 PDF library filename standardization and tag management"
   homepage "https://github.com/gdtknight/mn4-librarian"
-  url "https://github.com/gdtknight/mn4-librarian/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "dfeb459dc9d4f312b88589aaf853d3ed1fdeb4e93ccf3f2b41794921c9a9c76b"
+  url "https://github.com/gdtknight/mn4-librarian/archive/refs/tags/v0.1.2.tar.gz"
+  sha256 "0c807a68a3ec50eda3955345131189a5c3ac5aaf0b63cd11eaead65f5b04d97e"
   license "MIT"
 
   depends_on "python@3.12"
