@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mn4-librarian"
-version = "0.1.2"
+version = "0.1.3"
 description = "MarginNote4 PDF library filename standardization and tag management"
 readme = "README.md"
 license = "MIT"
