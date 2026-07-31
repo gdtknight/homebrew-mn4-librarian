@@ -56,10 +56,12 @@ def fixture_db(tmp_path):
     tagged_name = "2024-Tagged Book-Author-Publisher.pdf"
     untagged_name = "2024-Untagged Book-Author-Publisher.pdf"
     mismatched_name = "2024-Mismatched Book-Author-Publisher.pdf"
+    unregistered_name = "2024-Unregistered Book-Author-Publisher.pdf"
     for rel, name in [
         ("A. Major/Sub1", tagged_name),
         ("A. Major/Sub2", untagged_name),
         ("A. Major/Sub1", mismatched_name),
+        ("A. Major/Sub2", unregistered_name),  # ZBOOK 자체가 없음 (아래서 안 만듦)
     ]:
         (library_dir / rel / name).write_bytes(b"fake pdf bytes")
 
@@ -102,6 +104,14 @@ def test_folder_tag_mismatch_detected(fixture_db):
     assert len(mismatched) == 1
     assert mismatched[0]["rel"] == "A. Major/Sub1"
     assert mismatched[0]["tag_sub"] == "Sub2"
+
+
+def test_unregistered_file_detected(fixture_db):
+    db_path, library_dir = fixture_db
+    report = tags_audit.run_audit(db_path, library_dir)
+    assert any("Unregistered Book" in f for f in report.unregistered_files)
+    # 등록 안 된 파일은 untagged_books(ZBOOK 기반)에는 안 잡혀야 한다 — 애초에 DB에 없으므로
+    assert not any("Unregistered Book" in f for f in report.untagged_books)
 
 
 def test_clean_library_is_not_reported_clean_due_to_fixtures(fixture_db):

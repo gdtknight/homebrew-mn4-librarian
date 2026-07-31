@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import mn4_db, settings, taxonomy
+from . import config, mn4_db, settings, taxonomy
 
 
 def _normalize(name: str) -> str:
@@ -31,6 +31,8 @@ class AuditReport:
     near_duplicate_tags: dict[str, list[str]] = field(default_factory=dict)
     # ZBOOK이 가리키는데 디스크에 없는 파일
     missing_files: list[str] = field(default_factory=list)
+    # 디스크에는 있는데 MN4에 전혀 등록 안 된 파일 (ZBOOK 자체가 없음)
+    unregistered_files: list[str] = field(default_factory=list)
     # 완전 동일 MD5 / 동일 파일명-다른 MD5
     exact_md5_duplicates: dict[str, list[str]] = field(default_factory=dict)
     same_name_diff_md5: dict[str, list[str]] = field(default_factory=dict)
@@ -47,6 +49,7 @@ class AuditReport:
                 self.unused_subcategory_tags,
                 self.near_duplicate_tags,
                 self.missing_files,
+                self.unregistered_files,
                 self.exact_md5_duplicates,
                 self.same_name_diff_md5,
                 self.untagged_books,
@@ -120,6 +123,22 @@ def _check_near_duplicates(tag_index: mn4_db.TagIndex) -> dict[str, list[str]]:
     return result
 
 
+def _scan_disk_pdfs(library_dir: Path, exclude: frozenset[str]) -> set[str]:
+    """library_dir 아래 모든 PDF의 상대경로("대분류/소분류/파일.pdf") 집합.
+    MN4 DB에 아예 등록 안 된 파일(ZBOOK 자체가 없음)을 찾는 데 쓴다 — 예를 들어
+    라이브러리 폴더에 PDF를 직접 복사해 넣고 아직 MN4로 한 번도 열어보지 않은
+    경우, iter_library_books()는 DB 기반이라 이런 파일을 아예 못 본다."""
+    result = set()
+    for p in library_dir.rglob("*.pdf"):
+        if p.name.startswith(config.IGNORED_FILENAME_PREFIXES):
+            continue
+        rel = p.relative_to(library_dir)
+        if rel.parts and rel.parts[0] in exclude:
+            continue
+        result.add(rel.as_posix())
+    return result
+
+
 def run_audit(db_path: Path, library_dir: Path, exclude: frozenset[str] = frozenset()) -> AuditReport:
     con = mn4_db.connect_readonly(db_path)
     try:
@@ -148,6 +167,9 @@ def run_audit(db_path: Path, library_dir: Path, exclude: frozenset[str] = frozen
 
         exact_md5_dup = {k: v for k, v in md5_map.items() if len(v) > 1}
         same_name_diff_md5 = {k: v for k, v in name_map.items() if len(v) > 1}
+
+        known_paths = {f"{b.rel_dir}/{b.file}" for b in books}
+        unregistered = sorted(_scan_disk_pdfs(library_dir, exclude) - known_paths)
 
         known_majors = set(folder_taxonomy.keys())
         sub_to_major: dict[str, str] = {}
@@ -181,6 +203,7 @@ def run_audit(db_path: Path, library_dir: Path, exclude: frozenset[str] = frozen
             unused_subcategory_tags=unused,
             near_duplicate_tags=near_dupes,
             missing_files=missing_files,
+            unregistered_files=unregistered,
             exact_md5_duplicates=exact_md5_dup,
             same_name_diff_md5=same_name_diff_md5,
             untagged_books=untagged,
@@ -201,6 +224,33 @@ def save_report(report: AuditReport, logs_dir: Path) -> Path:
 def print_report(report: AuditReport) -> None:
     def section(title: str) -> None:
         print(f"\n{'=' * 70}\n{title}\n{'=' * 70}")
+
+    print("=" * 70)
+    print("요약 (조치가 필요한 순서대로)")
+    print("=" * 70)
+    summary_items = [
+        ("디스크에는 있는데 MN4에 전혀 등록 안 된 파일", len(report.unregistered_files)),
+        ("태그가 전혀 없는 책", len(report.untagged_books)),
+        ("대분류 태그가 없는 책", len(report.no_major_books)),
+        ("폴더-태그 불일치", len(report.folder_tag_mismatches)),
+        ("중복 파일 (완전 동일 MD5)", len(report.exact_md5_duplicates)),
+        ("중복 파일 (동일 파일명, 다른 MD5)", len(report.same_name_diff_md5)),
+        ("디스크에 없는 파일을 가리키는 ZBOOK", len(report.missing_files)),
+        ("폴더 구조 ↔ DB 태그 drift", len(report.missing_in_db) + len(report.missing_in_folder)),
+        ("근접중복 태그명", len(report.near_duplicate_tags)),
+        ("사용되지 않는 소분류 태그", len(report.unused_subcategory_tags)),
+    ]
+    for label, count in summary_items:
+        mark = "⚠" if count else "✓"
+        print(f"  {mark} {label}: {count}건")
+
+    section(f"디스크에는 있는데 MN4에 전혀 등록 안 된 파일 ({len(report.unregistered_files)}건)")
+    if report.unregistered_files:
+        for f in report.unregistered_files:
+            print(f"  {f}")
+        print("  (MarginNote4에서 한 번 열어 등록시킨 뒤 다시 감사하면 아래 '태그 없는 책'으로 잡힙니다)")
+    else:
+        print("없음")
 
     section("폴더 구조에는 있는데 DB 태그가 없음 (missing_in_db)")
     if report.missing_in_db:

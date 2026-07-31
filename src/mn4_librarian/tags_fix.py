@@ -145,6 +145,13 @@ def cmd_fix(argv: list[str] | None = None) -> int:
 
 
 def _dry_run_fixes(report: tags_audit.AuditReport) -> None:
+    if report.unregistered_files:
+        print(f"\n[처리 불가] MN4에 전혀 등록 안 된 파일 {len(report.unregistered_files)}건")
+        print("  MD5는 MN4가 자체 알고리즘으로 생성하므로 mn4-librarian이 대신 등록할 수 없습니다.")
+        print("  MarginNote4 앱에서 해당 파일을 한 번 열어 등록시킨 뒤 다시 감사하세요.")
+        for f in report.unregistered_files:
+            print(f"  {f}")
+
     if report.missing_in_db:
         print(f"\n[태그 생성] 폴더는 있는데 DB 태그가 없는 {len(report.missing_in_db)}건")
         for major, sub in report.missing_in_db:
