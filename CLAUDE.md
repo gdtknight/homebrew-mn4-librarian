@@ -21,6 +21,8 @@ SQLite DB의 태그 감사/수정 기능, 두 축으로 구성된다. `claude` C
 python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest tests/
+.venv/bin/pytest tests/test_naming.py::test_build_filename_basic   # 단일 테스트
+.venv/bin/pip install build && .venv/bin/python -m build --sdist   # CI도 수행 — sdist 구성 확인용 (아래 패키징 주의사항)
 
 # CLI 사용 (설치 후)
 mn4-librarian init                                  # 최초 설정 마법사
@@ -101,6 +103,30 @@ Learning"처럼 변종 카테고리를 만들지 않도록).
 없음) `needs_review=True`로 표시해 `--apply`에서도 자동 제외한다. `--apply`
 실행 시 되돌리기용 매니페스트(`--revert`)를 남긴다. `ThreadPoolExecutor`
 배치 처리 중 10건마다 체크포인트를 저장해 중간에 죽어도 결과가 남는다.
+
+## 테스트
+
+테스트는 `claude` CLI나 실제 MN4 DB를 쓰지 않는다. `test_tags_audit.py`는
+`tmp_path`에 MN4의 Core Data 스키마(`ZBOOK`/`ZBOOKCONFIG`/`ZBOOKTAG`/
+`Z_PRIMARYKEY`)를 재현한 SQLite와 라이브러리 폴더를 만들어 쓴다. 태그명은
+`$$$CATEGORY1$$$` 접두어, 태그-책 링크는 `$$$MNDOCLINK$$$...` 형식이므로
+픽스처를 추가할 때 이 형식을 따라야 한다. LLM을 호출하는 경로(`llm_parse`를
+쓰는 ingest/migrate/fill_years/tags_fix)는 현재 테스트가 없다.
+
+## 릴리스 절차
+
+**이 리포 자체가 Homebrew tap이다** (별도 `homebrew-*` 리포 없음). 리포 이름이
+`homebrew-` 접두어가 아니므로 사용자는 `brew tap gdtknight/mn4-librarian
+https://github.com/gdtknight/mn4-librarian`처럼 URL을 명시해 tap한다. 따라서
+`Formula/mn4-librarian.rb`를 `main`에 push하는 것이 곧 배포다.
+
+릴리스는 커밋 2개로 나뉜다:
+1. `chore: Bump version to X.Y.Z` — `pyproject.toml`의 `version`과
+   `src/mn4_librarian/__init__.py`의 `__version__`을 **둘 다** 올린다
+   (`--version` 출력은 `__init__.py` 값을 쓰고, Formula의 `test` 블록이 이를 검사)
+2. GitHub에 `vX.Y.Z` 태그/릴리스를 만든 뒤
+   `chore(formula): Point at vX.Y.Z release tarball` — `Formula/mn4-librarian.rb`의
+   `url`과 `sha256`을 새 태그 tarball로 갱신
 
 ## 주의사항
 
