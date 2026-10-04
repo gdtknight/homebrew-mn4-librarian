@@ -115,9 +115,10 @@ Learning"처럼 변종 카테고리를 만들지 않도록).
 
 ## 릴리스 절차
 
-**이 리포 자체가 Homebrew tap이다** (별도 `homebrew-*` 리포 없음). 리포 이름이
-`homebrew-` 접두어가 아니므로 사용자는 `brew tap gdtknight/mn4-librarian
-https://github.com/gdtknight/mn4-librarian`처럼 URL을 명시해 tap한다. 따라서
+**이 리포 자체가 Homebrew tap이다** (별도 tap 리포 없음). GitHub 리포 이름이
+`homebrew-mn4-librarian`인 이유가 이것 — Homebrew는 URL 없는
+`brew tap gdtknight/mn4-librarian`을 `github.com/gdtknight/homebrew-mn4-librarian`
+으로 해석한다. 패키지/CLI 이름은 `mn4-librarian` 그대로다.
 `Formula/mn4-librarian.rb`를 `main`에 push하는 것이 곧 배포다.
 
 릴리스는 커밋 2개로 나뉜다:

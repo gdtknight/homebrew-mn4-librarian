@@ -16,7 +16,7 @@ MarginNote4 PDF 라이브러리를 위한 파일명 표준화 + 태그 관리 �
 ## 설치
 
 ```bash
-brew tap gdtknight/mn4-librarian https://github.com/gdtknight/mn4-librarian
+brew tap gdtknight/mn4-librarian
 brew trust gdtknight/mn4-librarian   # 처음 추가하는 서드파티 tap이라 필요
 brew install mn4-librarian
 ```
@@ -68,8 +68,8 @@ DB를 직접 수정하는 명령(`tags fix --apply`, `tags apply-file-actions`)�
 ## 개발
 
 ```bash
-git clone https://github.com/gdtknight/mn4-librarian.git
-cd mn4-librarian
+git clone https://github.com/gdtknight/homebrew-mn4-librarian.git
+cd homebrew-mn4-librarian
 python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest
