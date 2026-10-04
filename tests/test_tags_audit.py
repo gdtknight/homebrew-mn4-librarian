@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from mn4_librarian import tags_audit
+from mn4_librarian import mn4_db, safety, tags_audit
 
 SCHEMA = """
 CREATE TABLE ZBOOKTAG (
@@ -119,3 +119,24 @@ def test_clean_library_is_not_reported_clean_due_to_fixtures(fixture_db):
     report = tags_audit.run_audit(db_path, library_dir)
     # fixture 자체가 미태깅/불일치 책을 포함하므로 clean이면 안 된다 (감사 로직이 실제로 뭔가 잡아냈는지 확인)
     assert not report.is_clean()
+
+
+def test_write_transaction_supports_mn4_db_row_access(fixture_db):
+    """쓰기 연결도 컬럼명으로 행에 접근할 수 있어야 한다 — tags fix --apply가
+    TagIndex 생성 시점에 TypeError로 죽던 회귀를 막는다."""
+    db_path, _library_dir = fixture_db
+
+    def add_sub_tag(con):
+        tag_index = mn4_db.TagIndex(con)
+        books = mn4_db.iter_library_books(con)
+        tag_index.create_tag("Sub3", tag_index.major_id("A. Major"))
+        return len(books)
+
+    assert safety.with_write_transaction(db_path, add_sub_tag) == 3
+
+    con = mn4_db.connect_readonly(db_path)
+    try:
+        tag_index = mn4_db.TagIndex(con)
+        assert tag_index.sub_id("A. Major", "Sub3")
+    finally:
+        con.close()

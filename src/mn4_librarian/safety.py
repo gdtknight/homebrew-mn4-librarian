@@ -59,6 +59,8 @@ def with_write_transaction(db_path: Path, fn: Callable[[sqlite3.Connection], T])
     integrity_check를 실행한다. fn은 자체적으로 con.commit()을 호출하지 않는다
     — 커밋은 이 함수가 성공 시 한 번만 수행한다."""
     con = sqlite3.connect(str(db_path))
+    # mn4_db의 모든 함수는 컬럼명으로 행에 접근한다 (connect_readonly와 동일하게 맞춤)
+    con.row_factory = sqlite3.Row
     try:
         result = fn(con)
     except Exception:
