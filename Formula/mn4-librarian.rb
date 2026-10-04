@@ -2,9 +2,9 @@ class Mn4Librarian < Formula
   include Language::Python::Virtualenv
 
   desc "MarginNote4 PDF library filename standardization and tag management"
-  homepage "https://github.com/gdtknight/mn4-librarian"
-  url "https://github.com/gdtknight/mn4-librarian/archive/refs/tags/v0.1.3.tar.gz"
-  sha256 "5f7d29605b3096dcab291ee5cf1954803ea6d03c4ee5427ab0ed7b958b7b34d8"
+  homepage "https://github.com/gdtknight/homebrew-mn4-librarian"
+  url "https://github.com/gdtknight/homebrew-mn4-librarian/archive/refs/tags/v0.1.3.tar.gz"
+  sha256 "b5a2c48bc746bef8b609f21f992205434fafee15d402f81e3d72b5c880079810"
   license "MIT"
 
   depends_on "python@3.12"

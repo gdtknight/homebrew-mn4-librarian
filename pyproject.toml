@@ -13,7 +13,7 @@ authors = [{ name = "gdtknight" }]
 dependencies = ["pypdf>=4.0"]
 
 [project.urls]
-Homepage = "https://github.com/gdtknight/mn4-librarian"
+Homepage = "https://github.com/gdtknight/homebrew-mn4-librarian"
 
 [project.scripts]
 mn4-librarian = "mn4_librarian.cli:main"
