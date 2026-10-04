@@ -62,6 +62,11 @@ mn4-librarian tags apply-file-actions <reviewed.json>  # 검토한 JSON대로 �
 직접 확인·수정한 뒤 `tags apply-file-actions`로 적용해야 한다 — 파일 이동/삭제는
 한 번의 명령으로 자동 실행되지 않는다.
 
+`ingest`나 폴더 정리는 파일만 옮기고 MarginNote4 DB는 갱신하지 않는다. 감사 결과
+대부분은 DB 기준이므로, 폴더를 바꾼 뒤에는 MarginNote4를 열어 동기화하고 종료한
+다음 `tags audit`을 다시 실행해야 반영된다 (DB가 폴더보다 오래됐으면 감사 출력
+맨 위에 경고가 뜬다).
+
 DB를 직접 수정하는 명령(`tags fix --apply`, `tags apply-file-actions`)은
 실행 전 MarginNote4가 종료돼 있어야 하며, 매번 자동으로 타임스탬프 백업을 만든다.
 

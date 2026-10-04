@@ -1,5 +1,7 @@
+import os
 import sqlite3
 import uuid
+from datetime import datetime
 
 import pytest
 
@@ -119,6 +121,56 @@ def test_clean_library_is_not_reported_clean_due_to_fixtures(fixture_db):
     report = tags_audit.run_audit(db_path, library_dir)
     # fixture 자체가 미태깅/불일치 책을 포함하므로 clean이면 안 된다 (감사 로직이 실제로 뭔가 잡아냈는지 확인)
     assert not report.is_clean()
+
+
+OLD = datetime(2026, 1, 1).timestamp()
+NEW = datetime(2026, 6, 1).timestamp()
+
+
+def _set_mtime(path, ts):
+    os.utime(path, (ts, ts))
+
+
+def test_db_last_modified_prefers_newer_wal(tmp_path):
+    db_path = tmp_path / "MarginNotes.sqlite"
+    wal_path = tmp_path / "MarginNotes.sqlite-wal"
+    db_path.write_bytes(b"")
+    wal_path.write_bytes(b"")
+    _set_mtime(db_path, OLD)
+    _set_mtime(wal_path, NEW)
+    assert mn4_db.last_modified(db_path) == datetime.fromtimestamp(NEW)
+
+
+def test_db_last_modified_without_wal(tmp_path):
+    db_path = tmp_path / "MarginNotes.sqlite"
+    db_path.write_bytes(b"")
+    _set_mtime(db_path, OLD)
+    assert mn4_db.last_modified(db_path) == datetime.fromtimestamp(OLD)
+
+
+def _library_with_old_mtimes(tmp_path):
+    library_dir = tmp_path / "library"
+    dirs = [library_dir / "A. Major" / "Sub1", library_dir / ".hidden", library_dir / "Inbox"]
+    for d in dirs:
+        d.mkdir(parents=True)
+    for d in [library_dir, library_dir / "A. Major", *dirs]:
+        _set_mtime(d, OLD)
+    return library_dir
+
+
+def test_library_last_modified_detects_file_moved_into_subfolder(tmp_path):
+    library_dir = _library_with_old_mtimes(tmp_path)
+    # 파일 이동은 파일 자체가 아니라 그 파일이 든 디렉토리의 mtime을 바꾼다
+    _set_mtime(library_dir / "A. Major" / "Sub1", NEW)
+    assert tags_audit.library_last_modified(library_dir) == datetime.fromtimestamp(NEW)
+
+
+def test_library_last_modified_ignores_hidden_and_excluded_dirs(tmp_path):
+    library_dir = _library_with_old_mtimes(tmp_path)
+    _set_mtime(library_dir / ".hidden", NEW)
+    _set_mtime(library_dir / "Inbox", NEW)
+    result = tags_audit.library_last_modified(library_dir, exclude=frozenset({"Inbox"}))
+    assert result == datetime.fromtimestamp(OLD)
 
 
 def test_write_transaction_supports_mn4_db_row_access(fixture_db):

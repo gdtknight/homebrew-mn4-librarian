@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 TAG_PREFIX = "$$$CATEGORY1$$$"
@@ -27,6 +28,13 @@ def connect_readonly(db_path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
+
+
+def last_modified(db_path: Path) -> datetime:
+    """DB가 마지막으로 바뀐 시각. MN4는 WAL 모드라 최근 변경은 본 파일이 아니라
+    -wal 파일에만 쌓여 있을 수 있으므로(checkpoint 전) 둘 중 늦은 쪽을 쓴다."""
+    candidates = [db_path, db_path.with_name(db_path.name + "-wal")]
+    return datetime.fromtimestamp(max(p.stat().st_mtime for p in candidates if p.exists()))
 
 
 @dataclass

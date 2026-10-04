@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -137,6 +138,39 @@ def _scan_disk_pdfs(library_dir: Path, exclude: frozenset[str]) -> set[str]:
             continue
         result.add(rel.as_posix())
     return result
+
+
+def library_last_modified(library_dir: Path, exclude: frozenset[str] = frozenset()) -> datetime:
+    """라이브러리 폴더 구조가 마지막으로 바뀐 시각.
+
+    폴더 생성/삭제와 파일 추가/이동/이름변경은 모두 해당 파일이 든 디렉토리의
+    mtime을 갱신하므로 디렉토리 mtime만 본다 — 파일 자체의 mtime은 이동해도
+    바뀌지 않아 ingest로 옮겨진 PDF를 놓친다."""
+    latest = 0.0
+    for root, dirs, _files in os.walk(library_dir):
+        at_top = Path(root) == library_dir
+        dirs[:] = [
+            d
+            for d in dirs
+            if not d.startswith(config.IGNORED_FILENAME_PREFIXES) and not (at_top and d in exclude)
+        ]
+        latest = max(latest, os.stat(root).st_mtime)
+    return datetime.fromtimestamp(latest)
+
+
+def print_freshness(db_modified: datetime, library_modified: datetime) -> None:
+    """감사 결과 대부분은 MN4 DB에서 나오는데 ingest/폴더 정리는 DB를 갱신하지
+    않는다. 그래서 폴더를 바꾼 직후 재감사해도 결과가 그대로인 이유를 알린다."""
+    fmt = "%Y-%m-%d %H:%M"
+    print(f"MN4 DB 마지막 변경:          {db_modified.strftime(fmt)}")
+    print(f"라이브러리 폴더 마지막 변경: {library_modified.strftime(fmt)}")
+    if library_modified > db_modified:
+        print(
+            "⚠ 라이브러리 폴더가 MN4 DB보다 나중에 바뀌었습니다. ingest/폴더 정리는 MN4 DB를\n"
+            "  갱신하지 않으므로, MarginNote 4를 열어 동기화한 뒤 종료하고 다시 감사해야\n"
+            "  DB 기반 항목(태그 없는 책, 폴더-태그 불일치 등)에 반영됩니다."
+        )
+    print()
 
 
 def run_audit(db_path: Path, library_dir: Path, exclude: frozenset[str] = frozenset()) -> AuditReport:
@@ -319,7 +353,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.parse_args(argv)
 
     st = settings.get_settings()
-    report = run_audit(st.mn4_db_path, st.library_dir, taxonomy.exclude_for(st))
+    exclude = taxonomy.exclude_for(st)
+    report = run_audit(st.mn4_db_path, st.library_dir, exclude)
+    print_freshness(mn4_db.last_modified(st.mn4_db_path), library_last_modified(st.library_dir, exclude))
     print_report(report)
     path = save_report(report, settings.logs_dir())
     print(f"\n리포트 저장: {path}")
